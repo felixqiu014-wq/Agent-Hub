@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -116,6 +117,216 @@ func TestListAgentsRejectsInvalidAuthorization(t *testing.T) {
 	}
 	if body.Error.Details["reason"] != "invalid_url_encoding" {
 		t.Fatalf("GET /api/v1/agents invalid Authorization error.details.reason = %#v, want invalid_url_encoding", body.Error.Details["reason"])
+	}
+}
+
+func TestEnsureAIProxyTokenRequiresAuthorization(t *testing.T) {
+	t.Parallel()
+
+	recorder := performRequest(t, http.MethodPost, "/api/v1/aiproxy/token/ensure", "", "", nil)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure without Authorization status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+
+	body := decodeEnvelope(t, recorder)
+	if body.Code != 40010 {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure without Authorization code = %d, want 40010", body.Code)
+	}
+	if body.Error == nil || body.Error.Type != "missing_authorization" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure without Authorization error = %#v, want missing_authorization", body.Error)
+	}
+}
+
+func TestEnsureAIProxyTokenReturnsExistingToken(t *testing.T) {
+	t.Parallel()
+
+	var searchCalls []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2alpha/token/search" {
+			t.Fatalf("search path = %q, want /api/v2alpha/token/search", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); auth != validEncodedKubeconfig() {
+			t.Fatalf("search Authorization = %q, want encoded kubeconfig", auth)
+		}
+
+		name := r.URL.Query().Get("name")
+		searchCalls = append(searchCalls, name)
+
+		w.Header().Set("Content-Type", "application/json")
+		switch name {
+		case "agent-hub":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":585,"name":"agent-hub","key":"sk-existing","status":1}]}}`))
+		case "agent-hub-ns-test":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+		case "agenthub-ns-test":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":585,"name":"agenthub-ns-test","key":"sk-existing","status":1}]}}`))
+		default:
+			t.Fatalf("unexpected search name = %q", name)
+		}
+	}))
+	defer upstream.Close()
+
+	recorder := performRequestWithConfig(t, config.Config{
+		Port:           "8080",
+		IngressSuffix:  "agent.usw-1.sealos.app",
+		APIServerImage: "nousresearch/hermes-agent:latest",
+		AIProxyBaseURL: upstream.URL,
+	}, http.MethodPost, "/api/v1/aiproxy/token/ensure", "", "", map[string]string{
+		"Authorization": validEncodedKubeconfig(),
+	})
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure existing status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	body := decodeEnvelope(t, recorder)
+	data, ok := body.Data["token"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure existing token = %#v, want token map", body.Data["token"])
+	}
+	if existed, _ := body.Data["existed"].(bool); !existed {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure existing existed = %#v, want true", body.Data["existed"])
+	}
+	if data["name"] != "agent-hub" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure existing token.name = %#v, want agent-hub", data["name"])
+	}
+	if data["key"] != "sk-existing" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure existing token.key = %#v, want sk-existing", data["key"])
+	}
+	if strings.Join(searchCalls, ",") != "agent-hub" {
+		t.Fatalf("search calls = %q, want fixed-name hit first", strings.Join(searchCalls, ","))
+	}
+}
+
+func TestEnsureAIProxyTokenCreatesMissingToken(t *testing.T) {
+	t.Parallel()
+
+	var createCalls int
+	var searchCalls []string
+	created := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2alpha/token/search":
+			name := r.URL.Query().Get("name")
+			searchCalls = append(searchCalls, name)
+			w.Header().Set("Content-Type", "application/json")
+			if name == "agent-hub" && created {
+				_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":586,"name":"agent-hub","key":"sk-created","status":1}]}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2alpha/token":
+			createCalls += 1
+			if auth := r.Header.Get("Authorization"); auth != validEncodedKubeconfig() {
+				t.Fatalf("create Authorization = %q, want encoded kubeconfig", auth)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(readBody(t, r)), &payload); err != nil {
+				t.Fatalf("decode create payload: %v", err)
+			}
+			if payload["name"] != "agent-hub" {
+				t.Fatalf("create payload name = %#v, want agent-hub", payload["name"])
+			}
+
+			created = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	recorder := performRequestWithConfig(t, config.Config{
+		Port:           "8080",
+		IngressSuffix:  "agent.usw-1.sealos.app",
+		APIServerImage: "nousresearch/hermes-agent:latest",
+		AIProxyBaseURL: upstream.URL,
+	}, http.MethodPost, "/api/v1/aiproxy/token/ensure", "", "", map[string]string{
+		"Authorization": validEncodedKubeconfig(),
+	})
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure create status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if createCalls != 1 {
+		t.Fatalf("create calls = %d, want 1", createCalls)
+	}
+
+	body := decodeEnvelope(t, recorder)
+	data, ok := body.Data["token"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure create token = %#v, want token map", body.Data["token"])
+	}
+	if existed, _ := body.Data["existed"].(bool); existed {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure create existed = %#v, want false", body.Data["existed"])
+	}
+	if data["key"] != "sk-created" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure create token.key = %#v, want sk-created", data["key"])
+	}
+	if data["name"] != "agent-hub" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure create token.name = %#v, want agent-hub", data["name"])
+	}
+	if strings.Join(searchCalls, ",") != "agent-hub,agent-hub-ns-test,agenthub-ns-test,agent-hub" {
+		t.Fatalf("search calls = %q, want fixed legacy legacy fixed", strings.Join(searchCalls, ","))
+	}
+}
+
+func TestEnsureAIProxyTokenFallsBackToLegacyNamespaceToken(t *testing.T) {
+	t.Parallel()
+
+	var searchCalls []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2alpha/token/search" {
+			t.Fatalf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+		}
+
+		name := r.URL.Query().Get("name")
+		searchCalls = append(searchCalls, name)
+
+		w.Header().Set("Content-Type", "application/json")
+		switch name {
+		case "agent-hub":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+		case "agent-hub-ns-test":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+		case "agenthub-ns-test":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":587,"name":"agenthub-ns-test","key":"sk-legacy","status":1}]}}`))
+		default:
+			t.Fatalf("unexpected search name = %q", name)
+		}
+	}))
+	defer upstream.Close()
+
+	recorder := performRequestWithConfig(t, config.Config{
+		Port:           "8080",
+		IngressSuffix:  "agent.usw-1.sealos.app",
+		APIServerImage: "nousresearch/hermes-agent:latest",
+		AIProxyBaseURL: upstream.URL,
+	}, http.MethodPost, "/api/v1/aiproxy/token/ensure", "", "", map[string]string{
+		"Authorization": validEncodedKubeconfig(),
+	})
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure legacy status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	body := decodeEnvelope(t, recorder)
+	data, ok := body.Data["token"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure legacy token = %#v, want token map", body.Data["token"])
+	}
+	if existed, _ := body.Data["existed"].(bool); !existed {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure legacy existed = %#v, want true", body.Data["existed"])
+	}
+	if data["name"] != "agenthub-ns-test" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure legacy token.name = %#v, want agenthub-ns-test", data["name"])
+	}
+	if data["key"] != "sk-legacy" {
+		t.Fatalf("POST /api/v1/aiproxy/token/ensure legacy token.key = %#v, want sk-legacy", data["key"])
+	}
+	if strings.Join(searchCalls, ",") != "agent-hub,agent-hub-ns-test,agenthub-ns-test" {
+		t.Fatalf("search calls = %q, want fixed then legacy names", strings.Join(searchCalls, ","))
 	}
 }
 
@@ -251,11 +462,17 @@ func TestWebSocketEndpointRequiresWebSocketUpgrade(t *testing.T) {
 func performRequest(t *testing.T, method, target, body, rawQuery string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	engine := New(config.Config{
+	return performRequestWithConfig(t, config.Config{
 		Port:           "8080",
 		IngressSuffix:  "agent.usw-1.sealos.app",
 		APIServerImage: "nousresearch/hermes-agent:latest",
-	})
+	}, method, target, body, rawQuery, headers)
+}
+
+func performRequestWithConfig(t *testing.T, cfg config.Config, method, target, body, rawQuery string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	engine := New(cfg)
 
 	if rawQuery != "" {
 		target += "?" + rawQuery
@@ -268,6 +485,16 @@ func performRequest(t *testing.T, method, target, body, rawQuery string, headers
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 	return recorder
+}
+
+func readBody(t *testing.T, r *http.Request) string {
+	t.Helper()
+
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	return string(raw)
 }
 
 func decodeEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) testEnvelope {

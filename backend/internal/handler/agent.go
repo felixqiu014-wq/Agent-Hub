@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -56,6 +57,7 @@ func ListAgents(c *gin.Context) {
 			writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, convErr.Error()))
 			return
 		}
+		enrichAgentRuntimeStatus(ctx, clientset, &item, &view)
 		enrichIngressDomain(ctx, clientset, &view)
 		views = append(views, view)
 	}
@@ -132,7 +134,11 @@ func CreateAgent(c *gin.Context) {
 		Status:        agent.StatusRunning,
 	}
 
-	objects, buildErr := kube.Build(ag, ingressDomain, cfg.APIServerImage)
+	objects, buildErr := kube.Build(ag, kube.BuildOptions{
+		IngressDomain: ingressDomain,
+		Image:         cfg.APIServerImage,
+		TemplateDir:   cfg.AgentTemplateDir,
+	})
 	if buildErr != nil {
 		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, "failed to build kubernetes resources"))
 		return
@@ -161,6 +167,7 @@ func CreateAgent(c *gin.Context) {
 		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, convErr.Error()))
 		return
 	}
+	enrichAgentRuntimeStatus(ctx, clientset, createdDevbox, &view)
 	view.Agent.IngressDomain = kube.IngressDomain(createdIngress)
 
 	writeSuccess(c, http.StatusCreated, dto.CreateAgentResponse{
@@ -240,6 +247,7 @@ func UpdateAgent(c *gin.Context) {
 		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, convErr.Error()))
 		return
 	}
+	enrichAgentRuntimeStatus(ctx, clientset, updatedDevbox, &view)
 	view.Agent.IngressDomain = kube.IngressDomain(updatedIngress)
 
 	writeSuccess(c, http.StatusOK, dto.AgentDetailResponse{Agent: toAgentItem(view)})
@@ -392,6 +400,107 @@ func RotateAgentKey(c *gin.Context) {
 	writeSuccess(c, http.StatusOK, dto.AgentKeyRotateResponse{AgentName: agentName, Rotated: true})
 }
 
+func ChatCompletions(c *gin.Context) {
+	factory, err := kubeFactory(c)
+	if err != nil {
+		writeHeaderKubeconfigError(c, err)
+		return
+	}
+
+	agentName := c.Param("agentName")
+	if err := validateAgentName(agentName); err != nil {
+		writeValidationError(c, err)
+		return
+	}
+
+	ctx := c.Request.Context()
+	repo, clientset, ok := newClients(c, factory)
+	if !ok {
+		return
+	}
+
+	view, found := getAgentView(ctx, factory.Namespace(), agentName, repo, clientset, c)
+	if !found {
+		return
+	}
+
+	apiBaseURL := strings.TrimSpace(kube.APIBaseURL(view.Agent.IngressDomain))
+	if apiBaseURL == "" {
+		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, "agent ingress domain is unavailable"))
+		return
+	}
+
+	apiServerKey := strings.TrimSpace(view.Agent.APIServerKey)
+	if apiServerKey == "" {
+		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, "agent api server key is unavailable"))
+		return
+	}
+
+	upstreamURL := strings.TrimRight(apiBaseURL, "/") + "/chat/completions"
+	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, c.Request.Body)
+	if reqErr != nil {
+		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, "failed to build chat proxy request"))
+		return
+	}
+
+	contentType := strings.TrimSpace(c.GetHeader("Content-Type"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	accept := strings.TrimSpace(c.GetHeader("Accept"))
+	if accept == "" {
+		accept = "application/json, text/event-stream"
+	}
+	req.Header.Set("Accept", accept)
+	req.Header.Set("Authorization", "Bearer "+apiServerKey)
+	req.Header.Set("X-API-Key", apiServerKey)
+
+	upstreamResp, upstreamErr := (&http.Client{}).Do(req)
+	if upstreamErr != nil {
+		writeAppError(c, http.StatusBadGateway, appErr.New(appErr.CodeKubernetesOperation, "failed to proxy chat request"))
+		return
+	}
+	defer upstreamResp.Body.Close()
+
+	if headerValue := upstreamResp.Header.Get("Content-Type"); headerValue != "" {
+		c.Header("Content-Type", headerValue)
+	}
+	if headerValue := upstreamResp.Header.Get("Cache-Control"); headerValue != "" {
+		c.Header("Cache-Control", headerValue)
+	}
+	if headerValue := upstreamResp.Header.Get("X-Accel-Buffering"); headerValue != "" {
+		c.Header("X-Accel-Buffering", headerValue)
+	} else {
+		c.Header("X-Accel-Buffering", "no")
+	}
+
+	c.Status(upstreamResp.StatusCode)
+	flusher, _ := c.Writer.(http.Flusher)
+	buffer := make([]byte, 32*1024)
+
+	for {
+		n, readErr := upstreamResp.Body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
+		if readErr == nil {
+			continue
+		}
+		if readErr == io.EOF {
+			return
+		}
+		return
+	}
+}
+
 func AgentWebSocket(c *gin.Context) {
 	agentws.Handler{Config: runtimeConfig(c)}.Serve(c, requestID(c))
 }
@@ -421,6 +530,7 @@ func getAgentView(ctx context.Context, namespace, agentName string, repo *kube.R
 		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, err.Error()))
 		return kube.AgentView{}, false
 	}
+	enrichAgentRuntimeStatus(ctx, clientset, devbox, &view)
 	view.Agent.IngressDomain = kube.IngressDomain(ing)
 	return view, true
 }
@@ -703,6 +813,7 @@ func changeAgentState(c *gin.Context, targetState string) {
 		writeAppError(c, http.StatusInternalServerError, appErr.New(appErr.CodeKubernetesOperation, convErr.Error()))
 		return
 	}
+	enrichAgentRuntimeStatus(ctx, clientset, updated, &view)
 	enrichIngressDomain(ctx, clientset, &view)
 
 	writeSuccess(c, http.StatusOK, dto.AgentDetailResponse{Agent: toAgentItem(view)})

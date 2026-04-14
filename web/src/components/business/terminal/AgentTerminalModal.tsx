@@ -16,6 +16,8 @@ export function AgentTerminalModal({
   containerRef,
   onClose,
 }: AgentTerminalModalProps) {
+  const displayName = session?.resource.aliasName || session?.resource.name || '--'
+
   return (
     <Modal
       description="直接进入容器环境，检查进程、日志和 CLI 状态。"
@@ -26,7 +28,7 @@ export function AgentTerminalModal({
       }
       onClose={onClose}
       open={open}
-      title={`终端 · ${session?.resource.name || '--'}`}
+      title={`终端 · ${displayName}`}
       widthClassName="max-w-5xl"
     >
       <div className="space-y-4">

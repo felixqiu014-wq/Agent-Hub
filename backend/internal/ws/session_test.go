@@ -83,6 +83,88 @@ func TestValidateMessageAcceptsIDForConcurrentOperations(t *testing.T) {
 	}
 }
 
+func TestValidateMessageAllowsWhitespaceTerminalInput(t *testing.T) {
+	t.Parallel()
+
+	cases := []dto.WSMessage{
+		{
+			Type: "terminal.input",
+			Data: map[string]any{
+				"id":    "term-1",
+				"input": " ",
+			},
+		},
+		{
+			Type: "terminal.input",
+			Data: map[string]any{
+				"id":    "term-1",
+				"input": "\r",
+			},
+		},
+	}
+
+	for _, message := range cases {
+		if err := validateMessage(message); err != nil {
+			t.Fatalf("validateMessage(%q) error = %v, want nil", message.Data["input"], err)
+		}
+	}
+}
+
+func TestResolveFilePathAllowsWorkspaceAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	got, err := resolveFilePath("/opt/hermes/notes/today.txt")
+	if err != nil {
+		t.Fatalf("resolveFilePath() error = %v", err)
+	}
+	if got != "/opt/hermes/notes/today.txt" {
+		t.Fatalf("resolveFilePath() = %q, want /opt/hermes/notes/today.txt", got)
+	}
+}
+
+func TestResolveTerminalPathDefaultsToWorkspace(t *testing.T) {
+	t.Parallel()
+
+	got, err := resolveTerminalPath(".")
+	if err != nil {
+		t.Fatalf("resolveTerminalPath() error = %v", err)
+	}
+	if got != "/opt/data/workspace" {
+		t.Fatalf("resolveTerminalPath() = %q, want /opt/data/workspace", got)
+	}
+}
+
+func TestResolveTerminalPathAllowsHermesRuntimeRoots(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{
+		"/opt/data/workspace/project",
+		"/opt/data/logs",
+		"/opt/hermes",
+		"/opt/hermes/.venv/bin",
+	}
+
+	for _, input := range cases {
+		got, err := resolveTerminalPath(input)
+		if err != nil {
+			t.Fatalf("resolveTerminalPath(%q) error = %v", input, err)
+		}
+		if got != input {
+			t.Fatalf("resolveTerminalPath(%q) = %q, want %q", input, got, input)
+		}
+	}
+}
+
+func TestResolveTerminalPathRejectsEscapes(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{"../etc/passwd", "/tmp/file", "/root"} {
+		if _, err := resolveTerminalPath(input); err == nil {
+			t.Fatalf("resolveTerminalPath(%q) should fail", input)
+		}
+	}
+}
+
 func TestSessionIDPrefersExplicitID(t *testing.T) {
 	t.Parallel()
 

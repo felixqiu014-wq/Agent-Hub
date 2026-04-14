@@ -22,6 +22,7 @@ func New(cfg config.Config) *gin.Engine {
 
 	v1 := engine.Group("/api/v1")
 	{
+		v1.POST("/aiproxy/token/ensure", handler.EnsureAIProxyToken)
 		v1.GET("/agents", handler.ListAgents)
 		v1.POST("/agents", handler.CreateAgent)
 		v1.GET("/agents/:agentName", handler.GetAgent)
@@ -31,6 +32,7 @@ func New(cfg config.Config) *gin.Engine {
 		v1.POST("/agents/:agentName/pause", handler.PauseAgent)
 		v1.GET("/agents/:agentName/key", handler.GetAgentKey)
 		v1.POST("/agents/:agentName/key/rotate", handler.RotateAgentKey)
+		v1.POST("/agents/:agentName/chat/completions", handler.ChatCompletions)
 		v1.GET("/agents/:agentName/ws", handler.AgentWebSocket)
 	}
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import http from 'node:http'
 import https from 'node:https'
 import { defineConfig } from 'vite'
@@ -7,6 +8,7 @@ import { parse as parseYaml } from 'yaml'
 
 const DEFAULT_K8S_SERVER = process.env.VITE_DEFAULT_K8S_SERVER || ''
 const FALLBACK_PROXY_TARGET = DEFAULT_K8S_SERVER || 'https://127.0.0.1:6443'
+const BACKEND_PROXY_TARGET = process.env.VITE_AGENTHUB_BACKEND_TARGET || 'http://127.0.0.1:8080'
 const INSECURE_HTTPS_AGENT = new https.Agent({ rejectUnauthorized: false })
 
 const toScalar = (value: unknown) => {
@@ -306,6 +308,14 @@ export default defineConfig({
     port: 3000,
     strictPort: true,
     proxy: {
+      '/backend-api': {
+        target: BACKEND_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+        rewriteWsOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/backend-api/, ''),
+      },
       '/k8s-api': {
         target: FALLBACK_PROXY_TARGET,
         agent: INSECURE_HTTPS_AGENT,

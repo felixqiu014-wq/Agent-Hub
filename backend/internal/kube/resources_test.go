@@ -24,7 +24,10 @@ func TestBuildReturnsKubernetesObjects(t *testing.T) {
 		APIServerKey:  "generated-api-key",
 	}
 
-	objects, err := Build(ag, "example-agent.usw-1.sealos.app", "nousresearch/hermes-agent:latest")
+	objects, err := Build(ag, BuildOptions{
+		IngressDomain: "example-agent.usw-1.sealos.app",
+		Image:         "nousresearch/hermes-agent:latest",
+	})
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -76,7 +79,10 @@ func TestBuildDoesNotLeakIngressAnnotationsToOtherResources(t *testing.T) {
 		APIServerKey:  "generated-api-key",
 	}
 
-	objects, err := Build(ag, "annotation-isolation.agent.usw-1.sealos.app", "nousresearch/hermes-agent:latest")
+	objects, err := Build(ag, BuildOptions{
+		IngressDomain: "annotation-isolation.agent.usw-1.sealos.app",
+		Image:         "nousresearch/hermes-agent:latest",
+	})
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}

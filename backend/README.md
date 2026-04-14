@@ -92,6 +92,35 @@ go mod tidy
 go run ./cmd/app
 ```
 
+## Hot reload
+
+本地开发推荐使用 `air` 做服务端热重载。
+
+先安装：
+
+```bash
+go install github.com/air-verse/air@latest
+```
+
+然后在 `backend` 目录启动：
+
+```bash
+air
+```
+
+仓库已经内置了 `backend/.air.toml`，默认行为是：
+
+- 监听 `backend` 下的 `.go / .yaml / .yml / .toml` 文件
+- 自动执行 `go build -o ./tmp/app ./cmd/app`
+- 构建成功后自动重启服务
+- 构建产物输出到 `backend/tmp/app`
+
+如果你的 `air` 不在 PATH，可直接这样启动：
+
+```bash
+$(go env GOPATH)/bin/air
+```
+
 用户本地常用启动方式：
 
 ```bash
@@ -108,6 +137,8 @@ INGRESS_SUFFIX=agent.usw-1.sealos.app AGENT_IMAGE=nousresearch/hermes-agent:late
 - `PORT`：默认 `8080`
 - `INGRESS_SUFFIX`：默认 `agent.usw-1.sealos.app`
 - `AGENT_IMAGE`：默认 `nousresearch/hermes-agent:latest`
+- `AGENT_MANIFEST_TEMPLATE_DIR`：默认自动探测仓库内 `template/hermes-agent/manifests`
+- `AIPROXY_BASE_URL`：默认 `https://aiproxy-web.hzh.sealos.run`
 
 健康检查：
 
