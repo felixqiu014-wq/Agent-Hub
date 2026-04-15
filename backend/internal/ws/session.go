@@ -30,6 +30,10 @@ import (
 
 const (
 	fileRootDir         = "/opt/hermes"
+	terminalDefaultDir  = "/opt/data/workspace"
+	terminalHomeDir     = "/opt/data/home"
+	terminalInstallDir  = "/opt/hermes"
+	terminalRuntimeRoot = "/opt/data"
 	wsReadLimit         = 1 << 20
 	wsWriteWait         = 10 * time.Second
 	wsPongWait          = 60 * time.Second
@@ -241,7 +245,7 @@ func (s *session) handleAuth(message dto.WSMessage) {
 		return
 	}
 
-	auth := getString(message.Data, "authorization")
+	auth := getTrimmedString(message.Data, "authorization")
 	if err := s.authenticate(auth); err != nil {
 		s.sendAppError(message.RequestID, err)
 		return
@@ -310,7 +314,7 @@ func (s *session) openTerminal(message dto.WSMessage) {
 		return
 	}
 
-	cwd, err := resolveFilePath(getString(message.Data, "cwd"))
+	cwd, err := resolveTerminalPath(getTrimmedString(message.Data, "cwd"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -337,7 +341,7 @@ func (s *session) terminalInput(message dto.WSMessage) {
 		return
 	}
 
-	if _, err := io.WriteString(terminal.stdin, getString(message.Data, "input")); err != nil {
+	if _, err := io.WriteString(terminal.stdin, getRawString(message.Data, "input")); err != nil {
 		s.sendError(message.RequestID, "terminal_write_failed", err.Error())
 	}
 }
@@ -398,7 +402,7 @@ func (s *session) unsubscribeLogs(message dto.WSMessage) {
 }
 
 func (s *session) fileList(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -419,7 +423,7 @@ func (s *session) fileList(message dto.WSMessage) {
 }
 
 func (s *session) fileRead(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -443,7 +447,7 @@ func (s *session) fileRead(message dto.WSMessage) {
 }
 
 func (s *session) fileDownload(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -468,13 +472,13 @@ func (s *session) fileDownload(message dto.WSMessage) {
 }
 
 func (s *session) fileWrite(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
 	}
 
-	if _, execErr := s.execCapture([]string{"sh", "-lc", "cat > " + shellQuote(resolved)}, getString(message.Data, "content")); execErr != nil {
+	if _, execErr := s.execCapture([]string{"sh", "-lc", "cat > " + shellQuote(resolved)}, getRawString(message.Data, "content")); execErr != nil {
 		s.sendError(message.RequestID, "file_write_failed", execErr.Error())
 		return
 	}
@@ -487,7 +491,7 @@ func (s *session) fileWrite(message dto.WSMessage) {
 }
 
 func (s *session) fileDelete(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -506,7 +510,7 @@ func (s *session) fileDelete(message dto.WSMessage) {
 }
 
 func (s *session) fileMkdir(message dto.WSMessage) {
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -526,7 +530,7 @@ func (s *session) fileMkdir(message dto.WSMessage) {
 
 func (s *session) fileUploadBegin(message dto.WSMessage) {
 	id := sessionID(message)
-	resolved, err := resolveFilePath(getString(message.Data, "path"))
+	resolved, err := resolveFilePath(getTrimmedString(message.Data, "path"))
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_path", err.Error())
 		return
@@ -552,7 +556,7 @@ func (s *session) fileUploadChunk(message dto.WSMessage) {
 		return
 	}
 
-	chunk := getString(message.Data, "chunk")
+	chunk := getRawString(message.Data, "chunk")
 	decoded, err := base64.StdEncoding.DecodeString(chunk)
 	if err != nil {
 		s.sendError(message.RequestID, "invalid_chunk", "upload chunk must be base64")
@@ -737,7 +741,7 @@ func (t *terminalSession) run(cwd string) {
 	pod := t.session.pod
 	t.session.stateMu.RUnlock()
 
-	command := []string{"sh", "-lc", "cd -- " + shellQuote(cwd) + " && exec sh"}
+	command := []string{"bash", "-lc", buildTerminalBootstrapCommand(cwd)}
 	err := kube.ExecInPod(t.ctx, clientset, factory.RESTConfig(), factory.Namespace(), pod.Name, pod.Container, command, t.stdinReader, writer, writer, true, terminalSizeQueue(t.resizeChan))
 	if err != nil && t.ctx.Err() == nil {
 		t.session.sendError(t.requestID, "terminal_exec_failed", err.Error())
@@ -922,7 +926,7 @@ func bootstrapAuthorization(c *gin.Context) string {
 }
 
 func sessionID(message dto.WSMessage) string {
-	if id := getString(message.Data, "id"); id != "" {
+	if id := getTrimmedString(message.Data, "id"); id != "" {
 		return id
 	}
 	if message.RequestID != "" {
@@ -931,13 +935,17 @@ func sessionID(message dto.WSMessage) string {
 	return "default"
 }
 
-func getString(data map[string]any, key string) string {
+func getRawString(data map[string]any, key string) string {
 	if data == nil {
 		return ""
 	}
 	value, _ := data[key]
 	text, _ := value.(string)
-	return strings.TrimSpace(text)
+	return text
+}
+
+func getTrimmedString(data map[string]any, key string) string {
+	return strings.TrimSpace(getRawString(data, key))
 }
 
 func getNumber(data map[string]any, key string) float64 {
@@ -970,20 +978,65 @@ func resolveFilePath(raw string) (string, error) {
 	if raw == "" || raw == "." {
 		return fileRootDir, nil
 	}
-	if path.IsAbs(raw) {
-		return "", fmt.Errorf("absolute paths are not allowed")
-	}
 
 	cleaned := path.Clean(raw)
+	if path.IsAbs(cleaned) {
+		if cleaned == fileRootDir || strings.HasPrefix(cleaned, fileRootDir+"/") {
+			return cleaned, nil
+		}
+		return "", fmt.Errorf("path escapes the workspace root")
+	}
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", fmt.Errorf("path escapes the workspace root")
 	}
 
 	resolved := path.Join(fileRootDir, cleaned)
-	if !strings.HasPrefix(resolved, fileRootDir) {
+	if resolved != fileRootDir && !strings.HasPrefix(resolved, fileRootDir+"/") {
 		return "", fmt.Errorf("path escapes the workspace root")
 	}
 	return resolved, nil
+}
+
+func resolveTerminalPath(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "." {
+		return terminalDefaultDir, nil
+	}
+
+	cleaned := path.Clean(raw)
+	if path.IsAbs(cleaned) {
+		if isWithinRoot(cleaned, terminalRuntimeRoot) || isWithinRoot(cleaned, terminalInstallDir) {
+			return cleaned, nil
+		}
+		return "", fmt.Errorf("path escapes the terminal workspace")
+	}
+
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("path escapes the terminal workspace")
+	}
+
+	resolved := path.Join(terminalDefaultDir, cleaned)
+	if !isWithinRoot(resolved, terminalDefaultDir) {
+		return "", fmt.Errorf("path escapes the terminal workspace")
+	}
+	return resolved, nil
+}
+
+func isWithinRoot(target, root string) bool {
+	return target == root || strings.HasPrefix(target, root+"/")
+}
+
+func buildTerminalBootstrapCommand(cwd string) string {
+	return strings.Join([]string{
+		"export HERMES_HOME=${HERMES_HOME:-" + shellQuote(terminalRuntimeRoot) + "}",
+		"if [ -d " + shellQuote(terminalHomeDir) + " ]; then export HOME=" + shellQuote(terminalHomeDir) + "; fi",
+		"if [ -d " + shellQuote(terminalInstallDir+"/.venv/bin") + " ]; then export PATH=" + shellQuote(terminalInstallDir+"/.venv/bin") + ":$PATH; fi",
+		"if [ -f " + shellQuote(terminalInstallDir+"/.venv/bin/activate") + " ]; then . " + shellQuote(terminalInstallDir+"/.venv/bin/activate") + "; fi",
+		"mkdir -p " + shellQuote(terminalDefaultDir) + " >/dev/null 2>&1 || true",
+		"cd -- " + shellQuote(cwd),
+		"if command -v bash >/dev/null 2>&1; then exec bash; fi",
+		"exec sh",
+	}, " && ")
 }
 
 func shellQuote(input string) string {
@@ -1031,7 +1084,20 @@ func validateMessage(message dto.WSMessage) error {
 	}
 
 	requiredString := func(key string) error {
-		if getString(message.Data, key) == "" {
+		if getTrimmedString(message.Data, key) == "" {
+			return fmt.Errorf("%s is required", key)
+		}
+		return nil
+	}
+
+	requiredRawString := func(key string) error {
+		value, exists := message.Data[key]
+		if !exists {
+			return fmt.Errorf("%s is required", key)
+		}
+
+		text, ok := value.(string)
+		if !ok || text == "" {
 			return fmt.Errorf("%s is required", key)
 		}
 		return nil
@@ -1050,7 +1116,7 @@ func validateMessage(message dto.WSMessage) error {
 		if err := requiredID(); err != nil {
 			return err
 		}
-		return requiredString("input")
+		return requiredRawString("input")
 	case "terminal.resize":
 		if err := requiredID(); err != nil {
 			return err
@@ -1078,7 +1144,7 @@ func validateMessage(message dto.WSMessage) error {
 		if err := requiredID(); err != nil {
 			return err
 		}
-		return requiredString("chunk")
+		return requiredRawString("chunk")
 	case "file.upload.end":
 		return requiredID()
 	case "ping":

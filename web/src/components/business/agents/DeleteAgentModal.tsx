@@ -18,6 +18,8 @@ export function DeleteAgentModal({
   onClose,
   onConfirm,
 }: DeleteAgentModalProps) {
+  const displayName = item?.aliasName || item?.name || '--'
+
   return (
     <Modal
       footer={
@@ -41,7 +43,9 @@ export function DeleteAgentModal({
         </div>
         <h3 className="text-lg font-semibold text-slate-950">确认删除这个 Agent 吗？</h3>
         <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-          将会联动删除实例 <span className="font-semibold text-slate-900">{item?.name || '--'}</span> 对应的 DevBox、Service 和 Ingress。这个操作不可撤销。
+          将会联动删除实例 <span className="font-semibold text-slate-900">{displayName}</span>
+          {item?.name ? <span className="text-slate-400">（{item.name}）</span> : null}
+          {' '}对应的 DevBox、Service 和 Ingress。这个操作不可撤销。
         </p>
       </div>
     </Modal>

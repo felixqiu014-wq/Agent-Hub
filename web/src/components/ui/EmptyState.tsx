@@ -10,7 +10,7 @@ interface EmptyStateProps {
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
-      <div className="mb-5 flex h-18 w-18 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-400">
+      <div className="mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-400">
         <Bot size={32} />
       </div>
       <h3 className="text-lg font-semibold text-slate-950">{title}</h3>

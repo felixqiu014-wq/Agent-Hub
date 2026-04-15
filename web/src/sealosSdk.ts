@@ -4,7 +4,18 @@ const isBrowser = typeof window !== 'undefined'
 
 let sdkInitialized = false
 
-const ensureSdkReady = () => {
+type SealosSdkMethod = (...args: unknown[]) => unknown
+
+type SealosSdkClient = {
+  getSession?: SealosSdkMethod
+  getLanguage?: SealosSdkMethod
+  getWorkspaceQuota?: SealosSdkMethod
+  getHostConfig?: SealosSdkMethod
+  runEvents?: SealosSdkMethod
+  addAppEventListen?: SealosSdkMethod
+}
+
+const ensureSdkReady = (): SealosSdkClient | null => {
   if (!sdkInitialized) {
     sdkInitialized = true
     try {
@@ -15,16 +26,16 @@ const ensureSdkReady = () => {
   }
 
   if (sealosApp && typeof sealosApp === 'object') {
-    return sealosApp
+    return sealosApp as SealosSdkClient
   }
 
   return null
 }
 
-const requireSdkMethod = (methodName) => {
+const requireSdkMethod = (methodName: keyof SealosSdkClient): SealosSdkMethod => {
   const client = ensureSdkReady()
   if (client && typeof client[methodName] === 'function') {
-    return client[methodName].bind(client)
+    return client[methodName]!.bind(client)
   }
   throw new Error(`[sealosSdk] SDK method not available: ${methodName}`)
 }
@@ -32,11 +43,7 @@ const requireSdkMethod = (methodName) => {
 export const initSealosDesktopSdk = () => {
   if (!isBrowser) return () => {}
 
-  try {
-    createSealosApp?.()
-  } catch (error) {
-    console.warn('[sealosSdk] init failed:', error)
-  }
+  ensureSdkReady()
 
   return () => {}
 }
@@ -45,9 +52,9 @@ export const getSealosSession = async () => requireSdkMethod('getSession')()
 export const getSealosLanguage = async () => requireSdkMethod('getLanguage')()
 export const getSealosQuota = async () => requireSdkMethod('getWorkspaceQuota')()
 export const getSealosHostConfig = async () => requireSdkMethod('getHostConfig')()
-export const runSealosEvent = async (eventName, eventData) => requireSdkMethod('runEvents')(eventName, eventData)
+export const runSealosEvent = async (eventName: string, eventData: unknown) => requireSdkMethod('runEvents')(eventName, eventData)
 
-export const addSealosAppEventListener = (eventName, handler) => {
+export const addSealosAppEventListener = (eventName: string, handler: (...args: unknown[]) => void) => {
   const addListener = requireSdkMethod('addAppEventListen')
   return addListener(eventName, handler)
 }

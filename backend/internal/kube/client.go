@@ -100,6 +100,13 @@ func (f *Factory) RESTConfig() *rest.Config {
 	return rest.CopyConfig(f.restConfig)
 }
 
+func (f *Factory) ClusterServer() string {
+	if f == nil || f.restConfig == nil {
+		return ""
+	}
+	return strings.TrimSpace(f.restConfig.Host)
+}
+
 func (f *Factory) Kubernetes() (*kubernetes.Clientset, error) {
 	return kubernetes.NewForConfig(f.restConfig)
 }

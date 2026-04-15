@@ -25,15 +25,20 @@ export interface AgentTemplateDefinition {
   port: number
   defaultArgs: string[]
   defaultModel: string
+  defaultModelProvider: string
+  defaultModelBaseURL: string
   defaultWorkingDirectory: string
   docsLabel: string
   capabilities: AgentActionCapability[]
   availability: 'active' | 'beta'
   availabilityLabel?: string
+  backendSupported: boolean
+  createDisabledReason?: string
 }
 
 export interface AgentBlueprint {
   appName: string
+  aliasName: string
   namespace: string
   apiKey: string
   apiUrl: string
@@ -53,6 +58,10 @@ export interface AgentBlueprint {
   user: string
   workingDir: string
   argsText: string
+  modelProvider: string
+  modelBaseURL: string
+  model: string
+  hasModelAPIKey: boolean
 }
 
 export interface ClusterInfo {
@@ -77,6 +86,14 @@ export interface ClusterContext {
   kubeconfig: string
 }
 
+export interface WorkspaceAIProxyToken {
+  id: number
+  name: string
+  key: string
+  status: number
+  existed: boolean
+}
+
 export interface ResourceItem {
   id: string
   name: string
@@ -88,10 +105,10 @@ export interface ResourceItem {
   apiKey: string
   apiUrl: string
   yaml: {
-    metadata?: Record<string, any>
-    spec?: Record<string, any>
-    status?: Record<string, any>
-    [key: string]: any
+    metadata?: Record<string, unknown>
+    spec?: Record<string, unknown>
+    status?: Record<string, unknown>
+    [key: string]: unknown
   }
   image?: string
 }
@@ -111,6 +128,7 @@ export interface ResourceGroup {
 export interface AgentListItem {
   id: string
   name: string
+  aliasName: string
   namespace: string
   labelId: string
   owner: string
@@ -126,13 +144,21 @@ export interface AgentListItem {
   template: AgentTemplateDefinition
   resourceGroup: ResourceGroup
   rawStatus: string
+  modelProvider: string
+  modelBaseURL: string
+  model: string
+  hasModelAPIKey: boolean
+  chatAvailable: boolean
+  chatDisabledReason: string
   yaml: Record<string, unknown>
 }
 
 export interface CreateBlueprintSeed {
   appName: string
+  aliasName: string
   namespace: string
   apiKey: string
+  apiUrl: string
   domainPrefix: string
   fullDomain: string
   state: 'Running' | 'Paused'

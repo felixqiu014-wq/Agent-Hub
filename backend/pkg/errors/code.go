@@ -11,6 +11,7 @@ const (
 	CodeConflict                   = 40900
 	CodeValidationFailed           = 42200
 	CodeKubernetesOperation        = 50010
+	CodeAIProxyOperation           = 50020
 	CodeNotImplemented             = 50100
 )
 
@@ -64,6 +65,8 @@ func errorTypeForCode(code int) string {
 		return "validation_failed"
 	case CodeKubernetesOperation:
 		return "kubernetes_operation_failed"
+	case CodeAIProxyOperation:
+		return "aiproxy_operation_failed"
 	case CodeNotImplemented:
 		return "not_implemented"
 	default:

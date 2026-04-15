@@ -1,0 +1,119 @@
+package handler
+
+import (
+	"context"
+	"testing"
+
+	"github.com/nightwhite/Agent-Hub/internal/agent"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes/fake"
+)
+
+func TestResolveAgentRuntimeStatusUsesPodReadiness(t *testing.T) {
+	t.Parallel()
+
+	devbox := newDevboxForStatusTest("Running")
+	clientset := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hermes",
+			Namespace: "ns-test",
+			Labels: map[string]string{
+				"agent.sealos.io/name": "hermes",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "hermes",
+				Ready: true,
+			}},
+		},
+	})
+
+	got := resolveAgentRuntimeStatus(context.Background(), clientset, devbox, "ns-test", "hermes")
+	if got != agent.StatusRunning {
+		t.Fatalf("resolveAgentRuntimeStatus() = %q, want %q", got, agent.StatusRunning)
+	}
+}
+
+func TestResolveAgentRuntimeStatusTreatsContainerCreatingAsCreating(t *testing.T) {
+	t.Parallel()
+
+	devbox := newDevboxForStatusTest("Running")
+	clientset := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hermes",
+			Namespace: "ns-test",
+			Labels: map[string]string{
+				"agent.sealos.io/name": "hermes",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "hermes",
+				State: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason: "ContainerCreating",
+					},
+				},
+			}},
+		},
+	})
+
+	got := resolveAgentRuntimeStatus(context.Background(), clientset, devbox, "ns-test", "hermes")
+	if got != agent.StatusCreating {
+		t.Fatalf("resolveAgentRuntimeStatus() = %q, want %q", got, agent.StatusCreating)
+	}
+}
+
+func TestResolveAgentRuntimeStatusTreatsFailedPodSyncAsFailed(t *testing.T) {
+	t.Parallel()
+
+	devbox := newDevboxForStatusTest("Running")
+	devbox.Object["status"] = map[string]any{
+		"phase": "Pending",
+		"conditions": []any{
+			map[string]any{
+				"type":    "PodSynced",
+				"status":  "False",
+				"reason":  "SyncFailed",
+				"message": `sync pod failed: exceeded quota`,
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset()
+	got := resolveAgentRuntimeStatus(context.Background(), clientset, devbox, "ns-test", "hermes")
+	if got != agent.StatusFailed {
+		t.Fatalf("resolveAgentRuntimeStatus() = %q, want %q", got, agent.StatusFailed)
+	}
+}
+
+func TestResolveAgentRuntimeStatusRespectsPausedState(t *testing.T) {
+	t.Parallel()
+
+	devbox := newDevboxForStatusTest("Paused")
+	clientset := fake.NewSimpleClientset()
+
+	got := resolveAgentRuntimeStatus(context.Background(), clientset, devbox, "ns-test", "hermes")
+	if got != agent.StatusPaused {
+		t.Fatalf("resolveAgentRuntimeStatus() = %q, want %q", got, agent.StatusPaused)
+	}
+}
+
+func newDevboxForStatusTest(state string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"metadata": map[string]any{
+				"name":      "hermes",
+				"namespace": "ns-test",
+			},
+			"spec": map[string]any{
+				"state": state,
+			},
+		},
+	}
+}

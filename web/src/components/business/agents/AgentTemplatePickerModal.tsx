@@ -24,10 +24,13 @@ function TemplateCard({
   return (
     <button
       className={`group flex flex-col rounded-[24px] border p-5 text-left transition ${
-        active
-          ? 'border-slate-900 bg-slate-50 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)]'
-          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70'
+        !template.backendSupported
+          ? 'cursor-not-allowed border-slate-200 bg-slate-50/70 opacity-70'
+          : active
+            ? 'border-slate-900 bg-slate-50 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)]'
+            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70'
       }`}
+      disabled={!template.backendSupported}
       onClick={onSelect}
       type="button"
     >
@@ -48,8 +51,11 @@ function TemplateCard({
         ) : null}
       </div>
       <p className="mt-4 flex-1 text-sm leading-6 text-slate-500">{template.description}</p>
+      {!template.backendSupported && template.createDisabledReason ? (
+        <p className="mt-3 text-xs leading-5 text-amber-700">{template.createDisabledReason}</p>
+      ) : null}
       <div className="mt-5 inline-flex items-center text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-brand)]">
-        选择模板
+        {template.backendSupported ? '选择模板' : '等待后端接入'}
         <ChevronRight className="ml-1" size={14} />
       </div>
     </button>
@@ -63,6 +69,8 @@ export function AgentTemplatePickerModal({
   onSelect,
   onContinue,
 }: AgentTemplatePickerModalProps) {
+  const selectedTemplate = AGENT_TEMPLATE_LIST.find((template) => template.id === selectedTemplateId)
+
   return (
     <Modal
       description="按照参考版本的创建路径，先选择 Agent 模板，再进入资源配置。"
@@ -70,7 +78,11 @@ export function AgentTemplatePickerModal({
       open={open}
       title="选择 Agent 模板"
       widthClassName="max-w-4xl"
-      footer={<Button onClick={onContinue}>下一步</Button>}
+      footer={
+        <Button disabled={!selectedTemplate?.backendSupported} onClick={onContinue}>
+          下一步
+        </Button>
+      }
     >
       <div className="grid gap-4 md:grid-cols-2">
         {AGENT_TEMPLATE_LIST.map((template) => (

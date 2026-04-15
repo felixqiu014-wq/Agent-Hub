@@ -1,6 +1,7 @@
-import { Check, Copy, MessageSquare, Settings, Terminal, Trash2 } from 'lucide-react'
+import { Check, Copy, MessageSquare, PauseCircle, PlayCircle, Settings, Terminal, Trash2 } from 'lucide-react'
 import { formatCpu, formatMemory, formatStorage } from '../../../lib/format'
 import type { AgentListItem } from '../../../domains/agents/types'
+import { Button } from '../../ui/Button'
 import { EmptyState } from '../../ui/EmptyState'
 import { StatusBadge } from '../../ui/StatusBadge'
 
@@ -11,6 +12,7 @@ interface AgentInstancesTableProps {
   onCopy: (value: string, key: string) => void
   onChat: (item: AgentListItem) => void
   onTerminal: (item: AgentListItem) => void
+  onToggleState: (item: AgentListItem) => void
   onEdit: (item: AgentListItem) => void
   onDelete: (item: AgentListItem) => void
 }
@@ -22,6 +24,7 @@ export function AgentInstancesTable({
   onCopy,
   onChat,
   onTerminal,
+  onToggleState,
   onEdit,
   onDelete,
 }: AgentInstancesTableProps) {
@@ -55,15 +58,24 @@ export function AgentInstancesTable({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {items.map((item) => {
-              const canChat = item.template.capabilities.includes('chat') && item.status === 'running'
+              const displayName = item.aliasName || item.name
+              const canChat =
+                item.template.capabilities.includes('chat') && item.status === 'running' && item.chatAvailable
               const canTerminal = item.template.capabilities.includes('terminal') && item.status === 'running'
+              const canToggleState = item.status === 'running' || item.status === 'stopped'
+              const toggleTitle =
+                item.status === 'running'
+                  ? '暂停'
+                  : item.status === 'stopped'
+                    ? '启动'
+                    : '当前状态不可切换运行态'
               const copyKey = `${item.id}:api-url`
 
               return (
                 <tr className="group transition hover:bg-slate-50/80" key={item.id}>
                   <td className="px-6 py-5 align-top">
-                    <div className="font-medium text-slate-950">{item.name}</div>
-                    <div className="mt-1 text-[11px] text-slate-400">labels id: {item.labelId}</div>
+                    <div className="font-medium text-slate-950">{displayName}</div>
+                    <div className="mt-1 text-[11px] text-slate-400">实例名: {item.name}</div>
                   </td>
                   <td className="px-6 py-5 align-top">
                     <div className="flex items-center gap-3">
@@ -101,35 +113,48 @@ export function AgentInstancesTable({
                   </td>
                   <td className="px-6 py-5 align-top">
                     <div className="flex justify-end gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
-                      <button
-                        className="btn-ghost"
+                      <Button
+                        className="h-9 w-9 px-0"
                         disabled={!canChat}
                         onClick={() => onChat(item)}
-                        title={canChat ? '对话' : '当前模板或状态不支持对话'}
+                        title={canChat ? '对话' : item.chatDisabledReason || '当前模板或状态不支持对话'}
                         type="button"
+                        variant="ghost"
                       >
                         <MessageSquare size={16} />
-                      </button>
-                      <button
-                        className="btn-ghost"
+                      </Button>
+                      <Button
+                        className="h-9 w-9 px-0"
                         disabled={!canTerminal}
                         onClick={() => onTerminal(item)}
                         title={canTerminal ? '终端' : '当前状态不可进入终端'}
                         type="button"
+                        variant="ghost"
                       >
                         <Terminal size={16} />
-                      </button>
-                      <button className="btn-ghost" onClick={() => onEdit(item)} title="配置" type="button">
+                      </Button>
+                      <Button
+                        className="h-9 w-9 px-0"
+                        disabled={!canToggleState}
+                        onClick={() => onToggleState(item)}
+                        title={toggleTitle}
+                        type="button"
+                        variant="ghost"
+                      >
+                        {item.status === 'running' ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+                      </Button>
+                      <Button className="h-9 w-9 px-0" onClick={() => onEdit(item)} title="配置" type="button" variant="ghost">
                         <Settings size={16} />
-                      </button>
-                      <button
-                        className="btn-ghost hover:bg-rose-50 hover:text-rose-600"
+                      </Button>
+                      <Button
+                        className="h-9 w-9 px-0 hover:bg-rose-50 hover:text-rose-600"
                         onClick={() => onDelete(item)}
                         title="删除"
                         type="button"
+                        variant="ghost"
                       >
                         <Trash2 size={16} />
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>

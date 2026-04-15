@@ -1,5 +1,5 @@
-import hermesAgentLogo from '../../assets/hermes-agent-logo.png'
-import openclawLogo from '../../assets/openclaw-logo.jpg'
+import hermesAgentLogo from '../../assets/hermes-agent-logo.png?inline'
+import openclawLogo from '../../assets/openclaw-logo.jpg?inline'
 import type {
   AgentBlueprint,
   AgentRuntimeStatus,
@@ -51,11 +51,14 @@ export const AGENT_TEMPLATES: Record<AgentTemplateId, AgentTemplateDefinition> =
     image: 'nousresearch/hermes-agent:latest',
     port: 8642,
     defaultArgs: ['gateway', 'run'],
-    defaultModel: 'hermes-agent',
-    defaultWorkingDirectory: '/home/admin',
+    defaultModel: 'gpt-4o-mini',
+    defaultModelProvider: 'openai',
+    defaultModelBaseURL: 'https://api.openai.com/v1',
+    defaultWorkingDirectory: '/opt/hermes',
     docsLabel: '对话 + 终端',
     capabilities: ['chat', 'terminal'],
     availability: 'active',
+    backendSupported: true,
   },
   openclaw: {
     id: 'openclaw',
@@ -68,11 +71,15 @@ export const AGENT_TEMPLATES: Record<AgentTemplateId, AgentTemplateDefinition> =
     port: 3000,
     defaultArgs: ['gateway', 'serve'],
     defaultModel: 'openclaw',
+    defaultModelProvider: 'openai',
+    defaultModelBaseURL: 'https://api.openai.com/v1',
     defaultWorkingDirectory: '/app',
     docsLabel: '终端优先',
     capabilities: ['terminal'],
     availability: 'beta',
-    availabilityLabel: 'Beta',
+    availabilityLabel: '暂未接入',
+    backendSupported: false,
+    createDisabledReason: '当前后端只支持 Hermes Agent，OpenClaw 暂未接入统一管理 API。',
   },
 }
 
@@ -80,10 +87,11 @@ export const AGENT_TEMPLATE_LIST = Object.values(AGENT_TEMPLATES)
 
 export const DEFAULT_TEMPLATE_ID: AgentTemplateId = 'hermes-agent'
 
-export const DEFAULT_FILE_DIRECTORY = '/home/admin'
+export const DEFAULT_FILE_DIRECTORY = '/opt/hermes'
 
 export const EMPTY_BLUEPRINT: AgentBlueprint = {
   appName: '',
+  aliasName: '',
   namespace: '',
   apiKey: '',
   apiUrl: '',
@@ -103,6 +111,10 @@ export const EMPTY_BLUEPRINT: AgentBlueprint = {
   user: '',
   workingDir: AGENT_TEMPLATES['hermes-agent'].defaultWorkingDirectory,
   argsText: AGENT_TEMPLATES['hermes-agent'].defaultArgs.join(' '),
+  modelProvider: AGENT_TEMPLATES['hermes-agent'].defaultModelProvider,
+  modelBaseURL: AGENT_TEMPLATES['hermes-agent'].defaultModelBaseURL,
+  model: AGENT_TEMPLATES['hermes-agent'].defaultModel,
+  hasModelAPIKey: false,
 }
 
 export const resolveResourcePreset = (cpu = '', memory = '') => {
@@ -122,7 +134,15 @@ export const mapRawStatusToRuntimeStatus = (status = ''): AgentRuntimeStatus => 
     return 'running'
   }
 
-  if (normalized.includes('pending') || normalized.includes('creating') || normalized.includes('initial')) {
+  if (
+    normalized.includes('pending') ||
+    normalized.includes('creating') ||
+    normalized.includes('initial') ||
+    normalized.includes('starting') ||
+    normalized.includes('updating') ||
+    normalized.includes('deleting') ||
+    normalized.includes('stopping')
+  ) {
     return 'creating'
   }
 
@@ -155,9 +175,10 @@ export const applyTemplateToBlueprint = (
   return {
     ...EMPTY_BLUEPRINT,
     appName: seed.appName,
+    aliasName: seed.aliasName,
     namespace: seed.namespace,
     apiKey: seed.apiKey,
-    apiUrl: `https://${seed.fullDomain}/v1`,
+    apiUrl: seed.apiUrl || (seed.fullDomain ? `https://${seed.fullDomain}/v1` : ''),
     domainPrefix: seed.domainPrefix,
     fullDomain: seed.fullDomain,
     image: template.image,
@@ -174,5 +195,9 @@ export const applyTemplateToBlueprint = (
     user: seed.user,
     workingDir: template.defaultWorkingDirectory || seed.workingDir,
     argsText: template.defaultArgs.join(' '),
+    modelProvider: template.defaultModelProvider,
+    modelBaseURL: template.defaultModelBaseURL,
+    model: template.defaultModel,
+    hasModelAPIKey: false,
   }
 }
