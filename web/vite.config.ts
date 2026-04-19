@@ -6,9 +6,19 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { parse as parseYaml } from 'yaml'
 
+if (!process.env.VITE_AGENTHUB_BROWSER_TITLE) {
+  process.env.VITE_AGENTHUB_BROWSER_TITLE = 'Agent Hub Web'
+}
+
+if (!process.env.VITE_AGENTHUB_FAVICON_URL) {
+  process.env.VITE_AGENTHUB_FAVICON_URL = '/brand/agent-hub.svg'
+}
+
 const DEFAULT_K8S_SERVER = process.env.VITE_DEFAULT_K8S_SERVER || ''
 const FALLBACK_PROXY_TARGET = DEFAULT_K8S_SERVER || 'https://127.0.0.1:6443'
-const BACKEND_PROXY_TARGET = process.env.VITE_AGENTHUB_BACKEND_TARGET || 'http://127.0.0.1:8080'
+const BACKEND_PROXY_TARGET = process.env.VITE_AGENTHUB_BACKEND_TARGET || 'http://127.0.0.1:8999'
+const AGENT_HUB_BROWSER_TITLE = process.env.VITE_AGENTHUB_BROWSER_TITLE || 'Agent Hub Web'
+const AGENT_HUB_FAVICON_URL = process.env.VITE_AGENTHUB_FAVICON_URL || '/brand/agent-hub.svg'
 const INSECURE_HTTPS_AGENT = new https.Agent({ rejectUnauthorized: false })
 
 const toScalar = (value: unknown) => {
@@ -300,8 +310,25 @@ const createViteK8sRestMiddlewarePlugin = () => ({
   },
 })
 
+const createAgentHubBrandHtmlPlugin = () => ({
+  name: 'agenthub-brand-html',
+  transformIndexHtml(html: string) {
+    return html
+      .replace('<title>Agent Hub Web</title>', `<title>${AGENT_HUB_BROWSER_TITLE}</title>`)
+      .replace(
+        '<link rel="icon" type="image/svg+xml" href="/brand/agent-hub.svg" />',
+        `<link rel="icon" type="image/svg+xml" href="${AGENT_HUB_FAVICON_URL}" />`,
+      )
+  },
+})
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), createViteK8sRestMiddlewarePlugin()],
+  plugins: [
+    createAgentHubBrandHtmlPlugin(),
+    react(),
+    tailwindcss(),
+    createViteK8sRestMiddlewarePlugin(),
+  ],
   server: {
     allowedHosts: true,
     host: '0.0.0.0',
