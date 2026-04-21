@@ -1,10 +1,11 @@
-import { Info } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 
 interface AgentHubOverviewProps {
   message: string
+  onClose?: () => void
 }
 
-export function AgentHubOverview({ message }: AgentHubOverviewProps) {
+export function AgentHubOverview({ message, onClose }: AgentHubOverviewProps) {
   if (!message) return null
 
   return (
@@ -13,6 +14,16 @@ export function AgentHubOverview({ message }: AgentHubOverviewProps) {
         <Info size={14} />
       </div>
       <div className="min-w-0 flex-1 leading-6">{message}</div>
+      {onClose ? (
+        <button
+          aria-label="关闭提示"
+          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-sky-600 transition hover:bg-white/80 hover:text-sky-900"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      ) : null}
     </div>
   )
 }
