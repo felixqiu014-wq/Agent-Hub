@@ -1037,42 +1037,66 @@ func listManagedIngressDomains(ctx context.Context, clientset kubernetes.Interfa
 }
 
 func listManagedLatestAgentPods(ctx context.Context, clientset kubernetes.Interface, namespace string) (map[string]*corev1.Pod, error) {
-	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+	managedPods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: kube.ManagedListSelector(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	latest := make(map[string]*corev1.Pod, len(pods.Items))
-	for i := range pods.Items {
-		pod := pods.Items[i]
+	latest := make(map[string]*corev1.Pod, len(managedPods.Items))
+	managedAgents := make(map[string]bool, len(managedPods.Items))
+	for i := range managedPods.Items {
+		pod := managedPods.Items[i]
 		agentName := strings.TrimSpace(pod.GetLabels()["agent.sealos.io/name"])
 		if agentName == "" {
 			continue
 		}
+		managedAgents[agentName] = true
+		upsertLatestAgentPod(latest, pod, agentName)
+	}
 
-		existing := latest[agentName]
-		if existing == nil {
-			podCopy := pod.DeepCopy()
-			latest[agentName] = podCopy
+	legacyPods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "agent.sealos.io/name",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	expectedManagedBy := strings.TrimSpace(kube.ManagedByValue())
+	for i := range legacyPods.Items {
+		pod := legacyPods.Items[i]
+		labels := pod.GetLabels()
+		agentName := strings.TrimSpace(labels["agent.sealos.io/name"])
+		if agentName == "" || managedAgents[agentName] {
 			continue
 		}
-		if existing.DeletionTimestamp != nil && pod.DeletionTimestamp == nil {
-			podCopy := pod.DeepCopy()
-			latest[agentName] = podCopy
+		managedBy := strings.TrimSpace(labels["agent.sealos.io/managed-by"])
+		if managedBy != "" && managedBy != expectedManagedBy {
 			continue
 		}
-		if existing.DeletionTimestamp == nil && pod.DeletionTimestamp != nil {
-			continue
-		}
-		if pod.CreationTimestamp.Time.After(existing.CreationTimestamp.Time) {
-			podCopy := pod.DeepCopy()
-			latest[agentName] = podCopy
-		}
+		upsertLatestAgentPod(latest, pod, agentName)
 	}
 
 	return latest, nil
+}
+
+func upsertLatestAgentPod(latest map[string]*corev1.Pod, pod corev1.Pod, agentName string) {
+	existing := latest[agentName]
+	if existing == nil {
+		latest[agentName] = pod.DeepCopy()
+		return
+	}
+	if existing.DeletionTimestamp != nil && pod.DeletionTimestamp == nil {
+		latest[agentName] = pod.DeepCopy()
+		return
+	}
+	if existing.DeletionTimestamp == nil && pod.DeletionTimestamp != nil {
+		return
+	}
+	if pod.CreationTimestamp.Time.After(existing.CreationTimestamp.Time) {
+		latest[agentName] = pod.DeepCopy()
+	}
 }
 
 func validateCreateRequest(
@@ -1201,6 +1225,17 @@ func normalizeCreateRequestSettings(
 	region string,
 ) dto.CreateAgentRequest {
 	settings := map[string]any{}
+	allowedSettingKeys := map[string]bool{}
+	for _, field := range templateDef.Settings.Agent {
+		trimmedKey := strings.TrimSpace(field.Key)
+		if trimmedKey == "" {
+			continue
+		}
+		if field.ReadOnly && strings.TrimSpace(field.Binding.Kind) == "derived" {
+			continue
+		}
+		allowedSettingKeys[trimmedKey] = true
+	}
 	for key, value := range req.Settings {
 		trimmedKey := strings.TrimSpace(key)
 		if trimmedKey == "" {
@@ -1218,6 +1253,9 @@ func normalizeCreateRequestSettings(
 		return strings.TrimSpace(text)
 	}
 	setSetting := func(key, value string) {
+		if !allowedSettingKeys[key] {
+			return
+		}
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			return
