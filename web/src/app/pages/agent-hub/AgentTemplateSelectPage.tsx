@@ -64,7 +64,7 @@ const filteredTemplates = useMemo(() => {
   return (
     <AgentWorkspaceShell>
       <div className="flex h-full w-full min-w-0 flex-col bg-[#fafafa]">
-        <div className="flex h-full min-h-0 flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-12 lg:py-10">
+        <div className="flex h-full min-h-0 flex-col overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-12 lg:py-10">
           <header className="flex flex-col gap-5 pb-8">
             <button
               className="flex w-fit cursor-pointer items-center gap-2 text-zinc-500 transition hover:text-zinc-950"
@@ -96,8 +96,8 @@ const filteredTemplates = useMemo(() => {
             </div>
           </header>
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[16px] border-zinc-200 bg-white">
+          <div className="flex flex-col xl:min-h-0 xl:flex-1 xl:overflow-hidden">
+            <Card className="flex flex-col overflow-hidden rounded-[16px] border-zinc-200 bg-white xl:min-h-0 xl:flex-1">
               <CardHeader className="gap-4 p-6 pb-5 lg:px-6 lg:py-6">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                   <div className="space-y-1.5">
@@ -128,7 +128,7 @@ const filteredTemplates = useMemo(() => {
 
               <Separator />
 
-              <CardContent className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 !pt-6">
+              <CardContent className="px-6 pb-6 !pt-6 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                 {loading ? (
                   <AgentTemplatePickerPanelLoading />
                 ) : filteredTemplates.length ? (
